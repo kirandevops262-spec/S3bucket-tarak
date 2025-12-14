@@ -52,13 +52,14 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: (Optional) Debug OIDC token
+      - name: Debug OIDC token payload
         uses: actions/github-script@v7
         with:
           script: |
             const token = await core.getIDToken('sts.amazonaws.com');
             const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-            console.log('OIDC token payload:', payload);
+            console.log("OIDC token payload:", payload);
+
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
