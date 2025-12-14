@@ -52,11 +52,20 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: (Optional) Debug OIDC token
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            console.log('OIDC token payload:', payload);
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::442042505580:role/test-oidc-role/GithubActionsDeployments
+          role-to-assume: arn:aws:iam::442042505580:role/test-oidc-role-GithubActionsDeployments
           aws-region: ap-south-1
+
 
       - name: Terraform Init
         run: terraform init
