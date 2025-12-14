@@ -10,8 +10,9 @@ on:
           - plan
           - apply
           - destroy
+
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
     types: [opened, synchronize, reopened, closed]
 
 jobs:
@@ -28,12 +29,26 @@ jobs:
       TERRAFORM_DIR: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - uses: hashicorp/setup-terraform@v3
+      # ✅ FIX: Install unzip (required by setup-terraform)
+      - name: Install unzip
+        run: |
+          if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y unzip
+          elif command -v yum &> /dev/null; then
+            sudo yum install -y unzip
+          else
+            echo "Unsupported OS"
+            exit 1
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
@@ -43,50 +58,44 @@ jobs:
           role-to-assume: arn:aws:iam::442042505580:role/github-oidc-role/GithubActionsDeployments
           aws-region: ap-south-1
 
-      - id: init
-        name: Run terraform init
+      - name: Terraform Init
         run: terraform init
         working-directory: ${{ env.TERRAFORM_DIR }}
 
-      - id: validate
-        name: Run terraform validate
+      - name: Terraform Validate
         run: terraform validate
         working-directory: ${{ env.TERRAFORM_DIR }}
 
-      - id: plan
-        name: Run terraform plan
+      - name: Terraform Plan
         if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' || (github.event_name == 'workflow_dispatch' && inputs.action == 'plan') }}
         run: |
-          set +e;
-          terraform plan -input=false -out=tfplan -detailed-exitcode;
-          PLAN_EXITCODE=$?;
-          echo "exitcode=$PLAN_EXITCODE" | tee -a $GITHUB_OUTPUT;
-
+          set +e
+          terraform plan -input=false -out=tfplan -detailed-exitcode
+          PLAN_EXITCODE=$?
+          echo "exitcode=$PLAN_EXITCODE" >> $GITHUB_OUTPUT
           terraform show -no-color tfplan > plan_output.txt
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            PLAN_COMMENT=$(cat plan_output.txt | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+            PLAN_COMMENT=$(sed 's/"/\\"/g' plan_output.txt | sed ':a;N;$!ba;s/\n/\\n/g')
             curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            -d "{\"body\": \"**Terraform Plan Output:**\n\n\`\`\`\n$PLAN_COMMENT\n\`\`\`\"}"
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+              -d "{\"body\": \"**Terraform Plan Output:**\n\n\`\`\`\n$PLAN_COMMENT\n\`\`\`\"}"
           fi
 
-          if [[ $PLAN_EXITCODE == 2 ]];
-          then
-            exit 0;
+          if [[ $PLAN_EXITCODE == 2 ]]; then
+            exit 0
           else
-            exit $PLAN_EXITCODE;
+            exit $PLAN_EXITCODE
           fi
         working-directory: ${{ env.TERRAFORM_DIR }}
 
-      - id: apply
-        name: Run terraform apply
+      - name: Terraform Apply
         if: ${{ (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply') }}
         run: |
           terraform plan -input=false -out=tfplan
-          terraform apply -auto-approve -input=false tfplan;
+          terraform apply -auto-approve -input=false tfplan
         working-directory: ${{ env.TERRAFORM_DIR }}
 
       - name: Clean up plan file
